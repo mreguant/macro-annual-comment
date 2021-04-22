@@ -20,7 +20,7 @@ end
 
 
 # this function takes correlations in uncertainty and generates transition paths
-function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D::Int64; damage="none", future="random")
+function uncertainty_model(df_clim::DataFrame, T::Int64, Y::Int64, D::Int64; damage="none", future="random")
 
 	df = DataFrame(p = Int64[], s = Int64[], s_1 = Int64[], ind_tr = Array{Int64,1}[], tr = Array{Float64,1}[], 
 		zeta = Float64[], g3 = Float64[], Y_last = Bool[]);
@@ -63,7 +63,7 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 
     model = Model(
         optimizer_with_attributes(Ipopt.Optimizer,  "print_level" => 1,
-            "acceptable_tol" => 1e-10)
+            "acceptable_tol" => 1e-12)
         );
 
     # model = Model(
@@ -140,4 +140,52 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 end
 
 
+function run_model(T::Int64, Y::Int64, D::Int64, beta::Float64,  pm::Dict{String,Float64}, dmg::String)
+    
+    params["beta"] = 1/((2.0-beta)^Y);
+
+    # Reading in distribution of climate sensitivities and computing uncertainty
+    df_clim = CSV.read(string(path,"input/model144.csv"), header=false, DataFrame);
+
+    # run several draws
+    results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
+            I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[]);
+    for d in 1:50
+        df = uncertainty_model(df_clim, T, Y, D, damage=dmg);
+        res = solve_model(params, df);
+        append!(results, res);
+    end
+
+    # keep only up to 2100
+    results.p = (results.p .- 1.0)*Y .+ 2020;
+    @linq df_plt = results |> where(results.p .<= 2100);
+    df_plt = combine(groupby(df_plt,[:p, :s]),:U=>mean=>:U, :V=>mean=>:V, :K=>mean=>:K,
+        :I=>mean=>:I, :C=>mean=>:C, :E=>mean=>:E, :Y=>mean=>:Y, :N=>mean=>:N);
+
+    return df_plt;
+
+end
+
+
+function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true)
+    
+    if (scat==true)
+        p1 = scatter(df_plt.p, df_plt.E/3.7, xlabel = "Emissions", ylabel = "Gt C") # Make a line plot
+        p2 = scatter(df_plt.p, df_plt.Y, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
+        p3 = scatter(df_plt.p, 1.0 ./df_plt.N, xlabel = "1/N")
+        p4 = scatter(df_plt.p, df_plt.I, xlabel = "Investment")
+    else
+        df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :I=>mean, :C=>mean, :U=>mean);
+        df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :C=>mean, :U=>mean);
+        p1 = plot(df_E.p, df_E.E_mean/3.7, xlabel = "Emissions", ylabel = "Gt C") # Make a line plot
+        p1 = plot!(df_ref.p, df_ref.E_mean/3.7, xlabel = "Emissions", ylabel = "Gt C") # Make a line plot
+        p2 = plot(df_E.p, df_E.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
+        p2 = plot!(df_ref.p, df_ref.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
+        p3 = plot(df_E.p, 1.0 ./df_E.N_mean, xlabel = "1/N")
+        p4 = plot(df_E.p, df_E.U_mean./df_ref.U_mean, xlabel = "Rel. U to Case 1")
+    end
+        
+    plot(p1, p2, p3, p4, layout = (2, 2), legend = false)
+
+end
 
