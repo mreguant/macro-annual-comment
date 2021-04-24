@@ -33,31 +33,34 @@ params = Dict("beta" => .99, "eta" => 0.032, "alpha" => .115, "delta" => .05,
 T = 18;
 T1 = 3;
 Y = 10;
-D = 5;
+D = 3;
 
 # Running and plotting
-for f in ["random"]
-	for c in ["none", "average"]
 
-		res1 = run_model(T, T1, Y, D, .99, params, dmg="Nordhaus", clim=c, fut=f);
+for c in ["none", "average"]
+	for cu in ["none", "persistent"]
 
-		res2 = run_model(T, T1, Y, D, .99, params, dmg="Medium", clim=c, fut=f);
+		res1 = run_model(T, T1, Y, D, .99, params, dmg="Nordhaus", clim=c, climunc=cu);
+
+		res2 = run_model(T, T1, Y, D, .99, params, dmg="Medium", clim=c, climunc=cu);
 		plot_model(res2, res1, scat=false)
-		Plots.savefig(string(path,"output/outcome_Medium_",f,"_",c,".pdf"));
+		Plots.savefig(string(path,"output/outcome_Medium_",c,"_",cu,".pdf"));
 		plot_model(res2, res1, scat=true)
-		Plots.savefig(string(path,"output/scatter_Medium_",f,"_",c,".pdf"));
+		Plots.savefig(string(path,"output/scatter_Medium_",c,"_",cu,".pdf"));
 
-		res3 = run_model(T, T1, Y, D, .99, params, dmg="Extreme", clim=c, fut=f);
+		res3 = run_model(T, T1, Y, D, .99, params, dmg="Extreme", clim=c, climunc=cu);
 		plot_model(res3, res1, scat=false)
-		Plots.savefig(string(path,"output/outcome_Extreme_",f,"_",c,".pdf"));
+		Plots.savefig(string(path,"output/outcome_Extreme_",c,"_",cu,".pdf"));
 		plot_model(res3, res1, scat=true)
-		Plots.savefig(string(path,"output/scatter_Extreme_",f,"_",c,".pdf"));
-		
-		res = run_model(T, T1, Y, D, .99, params, clim=c, fut=f);
-		plot_model(res, res1, scat=false)
-		Plots.savefig(string(path,"output/outcome_",f,"_",c,".pdf"));
-		plot_model(res, res1, scat=true)
-		Plots.savefig(string(path,"output/scatter_",f,"_",c,".pdf"));
+		Plots.savefig(string(path,"output/scatter_Extreme_",c,"_",cu,".pdf"));
+
+		for f in ["unknown", "gradual"]	
+			res = run_model(T, T1, Y, D, .99, params, dmgunc=f, clim=c, climunc=cu);
+			plot_model(res, res1, scat=false)
+			Plots.savefig(string(path,"output/outcome_",f,"_",c,"_",cu,".pdf"));
+			plot_model(res, res1, scat=true)
+			Plots.savefig(string(path,"output/scatter_",f,"_",c,"_",cu,".pdf"));
+		end
 
 	end
 end

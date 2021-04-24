@@ -20,7 +20,7 @@ end
 
 
 # this function takes correlations in uncertainty and generates transition paths
-function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D::Int64; damage="none", uncertainty="none", climate="none", future="random", alpha=0.2, alphad=0.2)
+function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D::Int64; damage="none",  damgunc="unknown", climate="none", climaunc="none",  alphac=0.2, alphag=0.1)
 
     ## damages
     g = [0.0, 0.032, 0.138];
@@ -33,7 +33,7 @@ function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D:
     end
 
     ## climate sensitivities (average over Y or just one draw for all Y)
-    if (uncertainty=="average")
+    if (climate=="average")
         df_clim[!,:mean] = [mean(sample(df_clim.Column1,Y)) for r in eachrow(df_clim)];
         df_clim.sensitivity = df_clim.mean;
     else
@@ -43,8 +43,8 @@ function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D:
     for p = 2:T
         Dp = Int(D^min(p-1,T1));
         climtemp = Float64[]
-        if (climate=="persistent")
-            climtemp = sort(sample(df_clim.sensitivity,Dp));
+        if (climaunc=="persistent") & (p - 1 > T1)
+            climtemp =  (1-alphac) * sample(df_clim.sensitivity,Dp) + alphac * climat[p-1];
         else
             climtemp = sample(df_clim.sensitivity,Dp);
         end
@@ -68,12 +68,12 @@ function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D:
             # transition to states
             if (p <= T1)
                 d = Int(dp-floor((dp-1)/D)*D);
-                if (future=="random")
-                    transition = [1.0/D for i=1:D];
-                elseif (future=="gradual")
-                    denom = sum(exp((p-1)*alpha * (d==i)) for i in 1:D)  #+ (p-1)*alphad * (ceil(d/(D/3))==ceil(i/(D/3)))
-                    transition = [exp((p-1)*alpha * (d==i))/denom for i in 1:D];
-                end
+                # if (future=="random")
+                transition = [1.0/D for i=1:D];
+                # elseif (future=="gradual")
+                #     denom = sum(exp((p-1)*alpha * (d==i)) for i in 1:D)
+                #     transition = [exp((p-1)*alpha * (d==i))/denom for i in 1:D];
+                # end
                 startt = Int(ct + Dp + D*(dp-1) + 1);
                 endt = Int(ct + Dp + D*dp);
                 tindex = [Int(i) for i=startt:endt];
@@ -89,12 +89,15 @@ function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D:
             s1p[dp]  = sindex;
 
             # expected damage probabilities
-            if (future=="random")
+            if (damgunc=="gradual")  # NOT WORKING YET
+                if (p - 1 <= T1)
+                    transition = [1.0/3.0 for i=1:3];
+                else
+                    dg = Int(ceil(dp/(Dp/3))); 
+                    transition =  (1-alphag) * damage[p-1][dp] + alphag * [(dg==i) * 1.0 for i in 1:3];
+                end
+            else 
                 transition = [1.0/3.0 for i=1:3];
-            elseif (future=="gradual")  # NOT WORKING YET
-                dg = Int(ceil(dp/(Dp/3))); 
-                denom = sum(exp((p-1)*alpha * (dg==i)) for i in 1:3)  #+ (p-1)*alphad * (ceil(d/(D/3))==ceil(i/(D/3)))
-                transition = [exp((p-1)*alpha * (dg==i))/denom for i in 1:3];
             end
             dmgp[dp] = transition;
         end
@@ -208,7 +211,7 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 end
 
 
-function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::Dict{String,Float64}; dmg="none", clim="none", fut="random", mc=20)
+function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::Dict{String,Float64}; clim="none", climunc = "random", dmg="none", dmgunc="unknown", mc=20)
     
     params["beta"] = 1/((2.0-beta)^Y);
 
@@ -221,7 +224,7 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
 
     # averaging outcomes over several monte carlos
     for d in 1:mc
-        df = uncertainty_model(df_clim, T, T1, Y, D, damage=dmg, climate=clim, future=fut);
+        df = uncertainty_model(df_clim, T, T1, Y, D, climate=clim, climaunc=climunc, damage=dmg, damgunc=dmgunc);
         res = solve_model(params, df);
         append!(results, res);
     end
