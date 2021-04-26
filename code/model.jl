@@ -20,16 +20,19 @@ end
 
 
 # this function takes correlations in uncertainty and generates transition paths
-function uncertainty_model(df_clim::DataFrame, T::Int64, T1::Int64, Y::Int64, D::Int64; damage="none",  damgunc="unknown", climate="none", climaunc="none",  alphac=0.2, alphag=0.1)
+function uncertainty_model(T::Int64, T1::Int64, Y::Int64, D::Int64, pm::Dict{String,Float64}; damage="none",  damgunc="unknown", climate="none", climaunc="none",  alphac=0.2, alphag=0.05)
+
+    # Reading in distribution of climate sensitivities and computing uncertainty
+    df_clim = CSV.read(string(path,"input/model144.csv"), header=false, DataFrame);
 
     ## damages
-    g = [0.0, 0.032, 0.138];
+    g = [params["g31"], params["g32"], params["g33"]];
     if (damage=="Nordhaus")
-        g = [0.0, 0.0, 0.0];
+        g = repeat([g[1]],3);
     elseif (damage=="Medium")
-        g = [0.032, 0.032, 0.032];
+        g = repeat([g[2]],3);
     elseif (damage=="Extreme")
-        g = [0.138, 0.138, 0.138];
+        g = repeat([g[3]],3);
     end
 
     ## climate sensitivities (average over Y or just one draw for all Y)
@@ -144,7 +147,6 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 
     S = Int(nrow(df));
     S_1 = Int(maximum(df.s .* (1 .-df.Y_last)));
-    S_E = Int(maximum(df.s .* (df.p.<=10)));
 
     # Convert d
 
@@ -153,17 +155,17 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     @variable(model, C[1:S] >= 0.0);  # consumption
     @variable(model, I[1:S] >= 0.0);  # investment
     @variable(model, N[1:S,1:3] >= 1.0);  # damages
-    @variable(model, 0.0 <= E[1:S] <= 60.0);  # energy (allow at most 60 Gt per year)
+    @variable(model, pm["Emin"] <= E[1:S] <= pm["Emax"]);  # energy (allow at most 60 Gt per year)
     @variable(model, Y[1:S] >= 1.0);  # temperature
     @variable(model, U[1:S]);  # utility function
     @variable(model, V[1:S]);  # value function
 
 
     # objective function
-    @objective(model, Max, V[1]);
+    @NLobjective(model, Max, V[1]);
 
     # initialization constraints
-    @constraint(model, K[1]==1000.0);
+    @constraint(model, K[1]==100.0);
     @constraint(model, Y[1]==1.2);
 
     # no borrowing at capital T
@@ -182,7 +184,7 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     @constraint(model, [s=2:S], Y[s] == Y[df.s_1[s]] + df.zeta[s] * E[df.s_1[s]]/3700.0);  # temperature equation
     @NLconstraint(model, [s=1:S,i=1:3], log(N[s,i]) == pm["g1"] * Y[s] + pm["g2"] * Y[s]^2 / 2.0 + df.g[s][i] * (Y[s]-Y[1])^2);  # damage equation
 
-    # constraint on last periods
+    # constraint on last periods (not needed as long as enough "burn out")
     @constraint(model, [s=S_1+1:S], E[s] <= sum(E[spast] for spast in 1:S_1)/S_1);
 
     optimize!(model);
@@ -192,20 +194,20 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     close(f)
 
     status = @sprintf("%s", JuMP.termination_status(model));
+
     if (status=="LOCALLY_SOLVED") | (status=="ALMOST_LOCALLY_SOLVED")
 
         results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
             I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[]);
         for s=1:S
             push!(results, [df.p[s], s, JuMP.value(U[s]), JuMP.value(V[s]), JuMP.value(K[s]),
-                JuMP.value(I[s]), JuMP.value(C[s]), JuMP.value(E[s]), JuMP.value(Y[s]), mean(1.0 ./JuMP.value(N[s]))])
+                JuMP.value(I[s]), JuMP.value(C[s]), JuMP.value(E[s])-pm["Emin"], JuMP.value(Y[s]), mean(1.0 ./JuMP.value(N[s]))])
         end
+
         return results;
 
     else
-
         return status;
-
     end
 
 end
@@ -215,16 +217,13 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
     
     params["beta"] = 1/((2.0-beta)^Y);
 
-    # Reading in distribution of climate sensitivities and computing uncertainty
-    df_clim = CSV.read(string(path,"input/model144.csv"), header=false, DataFrame);
-
     # run several draws
     results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
             I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[]);
 
     # averaging outcomes over several monte carlos
     for d in 1:mc
-        df = uncertainty_model(df_clim, T, T1, Y, D, climate=clim, climaunc=climunc, damage=dmg, damgunc=dmgunc);
+        df = uncertainty_model(T, T1, Y, D, params, climate=clim, climaunc=climunc, damage=dmg, damgunc=dmgunc);
         res = solve_model(params, df);
         append!(results, res);
     end

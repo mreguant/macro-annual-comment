@@ -27,39 +27,45 @@ include(string(path,"code/model.jl"));
 
 # Settings
 params = Dict("beta" => .99, "eta" => 0.032, "alpha" => .115, "delta" => .05, 
-	"g1" => .000177, "g2" =>.0044, "g31" => .000, "g32" => .039,  "g33" => .138);
+	"g1" => .000177, "g2" =>.0044, "g31" => .000, "g32" => .039,  "g33" => .06,
+	"Emin" => 0.0, "Emax" => 50.0);
 
 # Uncertainty modeling
 T = 18;
 T1 = 3;
 Y = 10;
 D = 3;
+nummc = 10;
+beta = .99;
 
 # Running and plotting
 
-for c in ["none", "average"]
-	for cu in ["none", "persistent"]
+for c in ["average"]
+	for cu in ["random", "persistent"]
 
-		res1 = run_model(T, T1, Y, D, .99, params, dmg="Nordhaus", clim=c, climunc=cu);
+		res1 = run_model(T, T1, Y, D, beta, params, dmg="Nordhaus", clim=c, climunc=cu, mc=nummc);
 
-		res2 = run_model(T, T1, Y, D, .99, params, dmg="Medium", clim=c, climunc=cu);
+		res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
 		plot_model(res2, res1, scat=false)
 		Plots.savefig(string(path,"output/outcome_Medium_",c,"_",cu,".pdf"));
 		plot_model(res2, res1, scat=true)
 		Plots.savefig(string(path,"output/scatter_Medium_",c,"_",cu,".pdf"));
 
-		res3 = run_model(T, T1, Y, D, .99, params, dmg="Extreme", clim=c, climunc=cu);
+		res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
 		plot_model(res3, res1, scat=false)
 		Plots.savefig(string(path,"output/outcome_Extreme_",c,"_",cu,".pdf"));
 		plot_model(res3, res1, scat=true)
 		Plots.savefig(string(path,"output/scatter_Extreme_",c,"_",cu,".pdf"));
 
+		plot_model(res3, res2, scat=false)
+		Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,".pdf"));
+
 		for f in ["unknown", "gradual"]	
-			res = run_model(T, T1, Y, D, .99, params, dmgunc=f, clim=c, climunc=cu);
+			res = run_model(T, T1, Y, D, beta, params, dmgunc=f, clim=c, climunc=cu, mc=nummc);
 			plot_model(res, res1, scat=false)
-			Plots.savefig(string(path,"output/outcome_",f,"_",c,"_",cu,".pdf"));
+			Plots.savefig(string(path,"output/outcome_",c,"_",cu,"_",f,".pdf"));
 			plot_model(res, res1, scat=true)
-			Plots.savefig(string(path,"output/scatter_",f,"_",c,"_",cu,".pdf"));
+			Plots.savefig(string(path,"output/scatter_",c,"_",cu,"_",f,".pdf"));
 		end
 
 	end
