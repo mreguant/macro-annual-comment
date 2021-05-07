@@ -26,7 +26,7 @@ function uncertainty_model(T::Int64, T1::Int64, Y::Int64, D::Int64, pm::Dict{Str
     df_clim = CSV.read(string(path,"input/model144.csv"), header=false, DataFrame);
 
     ## damages
-    g = [params["g31"], params["g32"], params["g33"]];
+    g = [pm["g31"], pm["g32"], pm["g33"]];
     if (damage=="Nordhaus")
         g = repeat([g[1]],3);
     elseif (damage=="Medium")
@@ -47,7 +47,7 @@ function uncertainty_model(T::Int64, T1::Int64, Y::Int64, D::Int64, pm::Dict{Str
         Dp = Int(D^min(p-1,T1));
         climtemp = Float64[]
         if (climaunc=="persistent") & (p - 1 > T1)
-            climtemp =  (1-alphac) * sample(df_clim.sensitivity,Dp) + alphac * climat[p-1];
+            climtemp =  (1.0-alphac) * sample(df_clim.sensitivity,Dp) + alphac * climat[p-1];
         else
             climtemp = sample(df_clim.sensitivity,Dp);
         end
@@ -97,7 +97,7 @@ function uncertainty_model(T::Int64, T1::Int64, Y::Int64, D::Int64, pm::Dict{Str
                     transition = [1.0/3.0 for i=1:3];
                 else
                     dg = Int(ceil(dp/(Dp/3))); 
-                    transition =  (1-alphag) * damage[p-1][dp] + alphag * [(dg==i) * 1.0 for i in 1:3];
+                    transition =  (1.0-alphag) * damage[p-1][dp] + alphag * [(dg==i) * 1.0 for i in 1:3];
                 end
             else 
                 transition = [1.0/3.0 for i=1:3];
@@ -137,7 +137,7 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 
     model = Model(
         optimizer_with_attributes(Ipopt.Optimizer,  "print_level" => 1,
-            "acceptable_tol" => 1e-12)
+            "acceptable_tol" => 1e-9)  #, "linear_solver" => "pardiso")
         );
 
     # model = Model(
@@ -155,7 +155,7 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     @variable(model, C[1:S] >= 0.0);  # consumption
     @variable(model, I[1:S] >= 0.0);  # investment
     @variable(model, N[1:S,1:3] >= 1.0);  # damages
-    @variable(model, pm["Emin"] <= E[1:S] <= pm["Emax"]);  # energy (allow at most 60 Gt per year)
+    @variable(model, pm["Emin"] <= E[1:S] <= pm["Emax"]);  # energy (allow at most Emax Gt per year)
     @variable(model, Y[1:S] >= 1.0);  # temperature
     @variable(model, U[1:S]);  # utility function
     @variable(model, V[1:S]);  # value function
@@ -165,27 +165,27 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     @NLobjective(model, Max, V[1]);
 
     # initialization constraints
-    @constraint(model, K[1]==100.0);
-    @constraint(model, Y[1]==1.2);
+    @constraint(model, K[1]==pm["K0"]);
+    @constraint(model, Y[1]==pm["Y0"]);
 
-    # no borrowing at capital T
+    # no borrowing
     @constraint(model, [s in S_1+1:S], I[s] >= 0.0);
 
     # definition utility function integrating possible damages
-    @NLconstraint(model, [s=1:S], U[s] == sum(df.pr_g[s][i] * (C[s]/N[s,i])^(1-pm["eta"]) * E[s]^pm["eta"] for i in 1:3));
-
+    @NLconstraint(model, [s=1:S], U[s] == sum(df.pr_g[s][i] * ((C[s]/N[s,i])^(1.0-pm["eta"]))*(E[s]^pm["eta"]) for i in 1:3));
+    
     # value function - Bellman
     @constraint(model, [s in S_1+1:S], V[s] == U[s]);
     @constraint(model, [s in 1:S_1], V[s] == U[s] + pm["beta"] * sum(df.tr[s][i] * V[df.ind_tr[s][i]] for i in 1:length(df.tr[s])));
 
+    factor = (50.0 * (1.0-pm["eta"])) / (11.5 * pm["eta"]);
+    @constraint(model, [s in 1:S], pm["Leontieff"] * factor * C[s] <= (1 - pm["eta"]) * E[s] / pm["eta"]);
+
     # law of motion and definition constraints
-    @constraint(model, [s=2:S], K[s] == I[df.s_1[s]] + (1.0-pm["delta"]) * K[df.s_1[s]]);
+    @constraint(model, [s=2:S], K[s] == I[df.s_1[s]] + pm["delta"] * K[df.s_1[s]]);
     @constraint(model, [s=1:S], C[s] + I[s] == pm["alpha"] * K[s]);
     @constraint(model, [s=2:S], Y[s] == Y[df.s_1[s]] + df.zeta[s] * E[df.s_1[s]]/3700.0);  # temperature equation
     @NLconstraint(model, [s=1:S,i=1:3], log(N[s,i]) == pm["g1"] * Y[s] + pm["g2"] * Y[s]^2 / 2.0 + df.g[s][i] * (Y[s]-Y[1])^2);  # damage equation
-
-    # constraint on last periods (not needed as long as enough "burn out")
-    @constraint(model, [s=S_1+1:S], E[s] <= sum(E[spast] for spast in 1:S_1)/S_1);
 
     optimize!(model);
 
@@ -198,10 +198,11 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     if (status=="LOCALLY_SOLVED") | (status=="ALMOST_LOCALLY_SOLVED")
 
         results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
-            I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[]);
+            I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[], SCC = Float64[]);
         for s=1:S
             push!(results, [df.p[s], s, JuMP.value(U[s]), JuMP.value(V[s]), JuMP.value(K[s]),
-                JuMP.value(I[s]), JuMP.value(C[s]), JuMP.value(E[s])-pm["Emin"], JuMP.value(Y[s]), mean(1.0 ./JuMP.value(N[s]))])
+                JuMP.value(I[s]), JuMP.value(C[s]), JuMP.value(E[s])-pm["Emin"], JuMP.value(Y[s]), 
+                mean(1.0 ./JuMP.value(N[s])), exp(log(factor * JuMP.value(C[s])) - log(JuMP.value(N[s])) - log(JuMP.value(E[s])))])
         end
 
         return results;
@@ -213,18 +214,115 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 end
 
 
+# appromiation approach to the infinite horizon game, not solved
+function solve_model_approx(pm::Dict{String,Float64}, df_grid::DataFrame, K::Int64, lambda::Array{Float64,1})
+
+    model = Model(
+        optimizer_with_attributes(Ipopt.Optimizer,  "print_level" => 1,
+            "acceptable_tol" => 1e-12, "linear_solver" => "pardiso")
+        );
+
+
+    # number of approximation points
+    S = Int(nrow(df_grid));
+
+    # approximation
+    K2  = Int(K^2);
+    ErrorNum = 4;
+
+    # Convert states to matrices
+    K = df_grid.K;
+    Y = df_grid.Y;
+
+    # main variables to solve for
+    @variable(model, Knext[1:S]);  # capital next period
+    @variable(model, Ynext[1:S] >= 1.0);  # temperature next period
+
+    # controls
+    @variable(model, C[1:S] >= 0.0);  # consumption
+    @variable(model, pm["Emin"] <= E[1:S] <= pm["Emax"]);  # energy (allow at most Emax Gt per year)
+    @variable(model, N[1:S,1:3] >= 1.0);  # damages
+
+    # auxiliary variables
+    @variable(model, U[1:S]);  # utility function
+    @variable(model, UprimeC[1:S]);  # utility function derivative C
+    @variable(model, UprimeE[1:S]);  # utility function derivative E
+    @variable(model, V[1:S]);  # value function
+    @variable(model, Vnext[1:S]);  # value function next period    
+    @variable(model, VprimeC[1:S]);  # value function next, derivative C
+    @variable(model, VprimeE[1:S]);  # value function next, derivative E
+    
+    # approximation
+    @variable(model, aV[1:K2]);  # approximation terms for state variables K and Y
+    @variable(model, errors[1:ErrorNum,1:S]);
+
+    # objective function
+    @NLobjective(model, Min, sum(lambda[i]*errors[i,s]^2 for i in 1:ErrorNum, s in 1:S));
+
+    # no borrowing
+    @constraint(model, [s in S_1+1:S],  C[s] <= pm["alpha"] * K[s]);
+
+    # definition utility function integrating possible damages
+    @NLconstraint(model, [s=1:S], U[s] == sum(df_grid.pr_g[s][i] * (C[s]/N[s,i])^(1.0-pm["eta"]) * E[s]^pm["eta"] for i in 1:3));
+    @NLconstraint(model, [s=1:S], UprimeC[s] == sum(df_grid.pr_g[s][i] * (1.0-pm["eta"]) * (C[s]/N[s,i])^(-pm["eta"]) * E[s]^pm["eta"] / N[s,i] for i in 1:3));
+    @NLconstraint(model, [s=1:S], UprimeE[s] == sum(df_grid.pr_g[s][i] * pm["eta"] * (C[s]/N[s,i])^(1.0-pm["eta"]) * E[s]^(pm["eta"]-1.0) for i in 1:3));
+
+    # value function - Bellman
+    @constraint(model, [s in 1:S], V[s] == U[s] + pm["beta"] * Vnext[s]);
+    @constraint(model, [s in 1:S], errors[1,s] == V[s] - sum(aV[k] * (K[s]) in 1:K2));
+    @NLconstraint(model, [s in 1:S], errors[1,s] == Vnext[s] - sum(aV[k] * (Knext[s]) in 1:K2));
+
+    # euler equations
+    @constraint(model, [s in 1:S], errors[2,s] == UprimeC[s] - beta * VprimeC[s]);
+    @constraint(model, [s in 1:S], errors[3,s] == UprimeE[s] - beta * VprimeE[s]);
+
+    # law of motion and definition constraints (here I could include uncertainty)
+    @constraint(model, [s=2:S], Knext[s] == pm["alpha"] * K[s] - C[s] + pm["delta"] * K[s]);
+    @constraint(model, [s=2:S], Ynext[s] == Y[s] + df_grid.zeta[s] * E[s]/3700.0);  # temperature equation
+    @NLconstraint(model, [s=1:S,i=1:3], log(N[s,i]) == pm["g1"] * Y[s] + pm["g2"] * Y[s]^2 / 2.0 + df_grid.g[s][i] * (Y[s]-Y[1])^2);  # damage equation
+
+    optimize!(model);
+
+    f = open(string(path,"code/model.lp"), "w")
+    print(f, model)
+    close(f)
+
+    status = @sprintf("%s", JuMP.termination_status(model));
+
+    factor = 50/11.5 * (1.0-pm["eta"]) / pm["eta"];
+
+    if (status=="LOCALLY_SOLVED") | (status=="ALMOST_LOCALLY_SOLVED")
+
+        results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
+            C = Float64[], E = Float64[], Y = Float64[], N = Float64[], SCC = Float64[]);
+        for s=1:S
+            push!(results, [df_grid.p[s], s, JuMP.value(U[s]), JuMP.value(V[s]), K[s],
+                JuMP.value(C[s]), JuMP.value(E[s])-pm["Emin"], Y[s], 
+                mean(1.0 ./JuMP.value(N[s])), exp(log(factor * JuMP.value(C[s])) - log(JuMP.value(N[s])) - log(JuMP.value(E[s])))])
+        end
+
+        return results;
+
+    else
+        return status;
+    end
+
+end
+
+
+
 function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::Dict{String,Float64}; clim="none", climunc = "random", dmg="none", dmgunc="unknown", mc=20)
     
-    params["beta"] = 1/((2.0-beta)^Y);
+    pm["beta"] = 1/((2.0-beta)^Y);
 
     # run several draws
     results = DataFrame(p = Int64[], s = Int64[], U = Float64[], V = Float64[], K = Float64[],
-            I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[]);
+            I = Float64[], C = Float64[], E = Float64[], Y = Float64[], N = Float64[], SCC = Float64[]);
 
     # averaging outcomes over several monte carlos
     for d in 1:mc
-        df = uncertainty_model(T, T1, Y, D, params, climate=clim, climaunc=climunc, damage=dmg, damgunc=dmgunc);
-        res = solve_model(params, df);
+        df = uncertainty_model(T, T1, Y, D, pm, climate=clim, climaunc=climunc, damage=dmg, damgunc=dmgunc);
+        res = solve_model(pm, df);
         append!(results, res);
     end
 
@@ -232,7 +330,7 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
     results.p = (results.p .- 1.0)*Y .+ 2020;
     @linq df_plt = results |> where(results.p .<= 2100);
     df_plt = combine(groupby(df_plt,[:p, :s]),:U=>mean=>:U, :V=>mean=>:V, :K=>mean=>:K,
-        :I=>mean=>:I, :C=>mean=>:C, :E=>mean=>:E, :Y=>mean=>:Y, :N=>mean=>:N);
+        :I=>mean=>:I, :C=>mean=>:C, :E=>mean=>:E, :Y=>mean=>:Y, :N=>mean=>:N, :SCC=>mean=>:SCC);
 
     return df_plt;
 
@@ -247,13 +345,14 @@ function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true)
         p3 = scatter(df_plt.p, df_plt.N, xlabel = "1/N")
         p4 = scatter(df_plt.p, df_plt.I, xlabel = "Investment")
     else
-        df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :I=>mean, :C=>mean, :U=>mean);
-        df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :C=>mean, :U=>mean);
+        df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :I=>mean, :C=>mean, :U=>mean, :SCC=>mean);
+        df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :C=>mean, :U=>mean, :SCC=>mean);
         p1 = plot(df_E.p, df_E.E_mean/3.7, xlabel = "Emissions", ylabel = "Gt C") # Make a line plot
         p1 = plot!(df_ref.p, df_ref.E_mean/3.7, xlabel = "Emissions", ylabel = "Gt C") # Make a line plot
         p2 = plot(df_E.p, df_E.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
         p2 = plot!(df_ref.p, df_ref.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
-        p3 = plot(df_E.p, df_E.N_mean, xlabel = "1/N")
+        p3 = plot(df_E.p, df_E.SCC_mean, xlabel = "SCC (\$/ton)")
+        p3 = plot!(df_ref.p, df_ref.SCC_mean, xlabel = "SCC (\$/ton)")
         p4 = plot(df_E.p, df_E.U_mean./df_ref.U_mean, xlabel = "Rel. U to Case 1")
     end
         

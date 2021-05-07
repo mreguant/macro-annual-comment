@@ -7,7 +7,7 @@ macro_model_climate:
 
 using CSV, DataFrames, DataFramesMeta
 using JuMP, PiecewiseLinearOpt # used for mathematical programming
-using Ipopt # solver
+using Ipopt, Libdl # solver
 using Cbc, Gurobi
 using Printf
 using LinearAlgebra
@@ -26,12 +26,12 @@ end
 include(string(path,"code/model.jl"));
 
 # Settings
-params = Dict("beta" => .99, "eta" => 0.032, "alpha" => .115, "delta" => .05, 
-	"g1" => .000177, "g2" =>.0044, "g31" => .000, "g32" => .039,  "g33" => .06,
-	"Emin" => 0.0, "Emax" => 50.0);
+params = Dict("beta" => .99, "eta" => 0.032, "sigma" => 0.5, "alpha" => .115, "delta" => .95, 
+	"g1" => .000177, "g2" =>.0044, "g31" => .000, "g32" => .008,  "g33" => .16,
+	"Y0" => 1.2, "K0" => 100.0, "Emin" => 0.0, "Emax" => 50.0, "Leontieff" => 0.0);
 
 # Uncertainty modeling
-T = 18;
+T = 20;
 T1 = 3;
 Y = 10;
 D = 3;
