@@ -157,10 +157,14 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
     # definition utility function integrating possible damages
     @NLconstraint(model, [s=1:S], U[s] <= sum(df.pr_g[s][i] * ((C/N[s,i])^(1.0-pm["eta"]))*(E[s]^pm["eta"]) for i in 1:3));
     
-    # value function - Bellman
+    # value function - Bellman definition
     @constraint(model, [s in S_1+1:S], V[s] == U[s]/(1-pm["beta"]));
     @constraint(model, [s in 1:S_1], V[s] == U[s] + pm["beta"] * sum(df.tr[s][i] * V[df.ind_tr[s][i]] for i in 1:length(df.tr[s])));
 
+    # law of motion and definition constraints
+    @constraint(model, [s=2:S], Y[s] == Y[df.s_1[s]] + df.zeta[s] * E[df.s_1[s]]/3670.0);  # temperature equation (based on previous actions)
+    @NLconstraint(model, [s=1:S,i=1:3], log(N[s,i]) == pm["g1"] * Y[s] + pm["g2"] * Y[s]^2 / 2.0 + df.g[s][i] * (Y[s]-Y[1])^2);  # damage equation
+        
     factor = (50.0 * (1.0-pm["eta"])) / (C * pm["eta"]);
     if (pm["Leontieff"]!=0.0)
         @constraint(model, [s in 1:S], C <= E[s]/(pm["Leontieff"] * factor));
@@ -171,10 +175,6 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
         @constraint(model, E[1]==pm["E0"])
         @constraint(model, [s in 2:S], E[s] >= 0.6*E[df.s_1[s]]);
     end
-
-    # law of motion and definition constraints
-    @constraint(model, [s=2:S], Y[s] == Y[df.s_1[s]] + df.zeta[s] * E[df.s_1[s]]/3670.0);  # temperature equation
-    @NLconstraint(model, [s=1:S,i=1:3], log(N[s,i]) == pm["g1"] * Y[s] + pm["g2"] * Y[s]^2 / 2.0 + df.g[s][i] * (Y[s]-Y[1])^2);  # damage equation
 
     optimize!(model);
 
@@ -227,25 +227,32 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
 end
 
 
-function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true)
+function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true, only_emissions=false)
     
-    if (scat==true)
-        p1 = scatter(df_plt.p, df_plt.E/3.67, xlabel = "Emissions", ylabel = "Gt Carbon") # Make a line plot
-        p2 = scatter(df_plt.p, df_plt.Y, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
-        p3 = scatter(df_plt.p, df_plt.N, xlabel = "1/N")
-        p4 = scatter(df_plt.p, df_plt.V, xlabel = "Value Function")
-    else
+    if (only_emissions == true)
         df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :U=>mean, :SCC=>mean);
-        df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :U=>mean, :SCC=>mean);
-        p1 = plot(df_E.p, df_E.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon") # Make a line plot
-        p1 = plot!(df_ref.p, df_ref.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon") # Make a line plot
-        p2 = plot(df_E.p, df_E.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
-        p2 = plot!(df_ref.p, df_ref.Y_mean, xlabel = "Temperature", ylabel = "degree C") # Make a scatter plot
-        p3 = plot(df_E.p, df_E.SCC_mean, xlabel = "SCC (\$/ton)")
-        p3 = plot!(df_ref.p, df_ref.SCC_mean, xlabel = "SCC (\$/ton)")
-        p4 = plot(df_E.p, df_E.U_mean./df_ref.U_mean, xlabel = "Rel. U to Case 1")
+            df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :U=>mean, :SCC=>mean);
+            p1 = plot(df_E.p, df_E.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon", linestyle=:dash, linewidth=2, linecolor=:black) 
+            p1 = plot!(df_ref.p, df_ref.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon", linewidth=2, linecolor=:black) 
+        plot(p1, legend = false)   
+    else
+        if (scat==true)
+            p1 = scatter(df_plt.p, df_plt.E/3.67, xlabel = "Emissions", ylabel = "Gt Carbon")
+            p2 = scatter(df_plt.p, df_plt.Y, xlabel = "Temperature", ylabel = "degree C")
+            p3 = scatter(df_plt.p, df_plt.N, xlabel = "1/N")
+            p4 = scatter(df_plt.p, df_plt.V, xlabel = "Value Function")
+        else
+            df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :U=>mean, :SCC=>mean);
+            df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :U=>mean, :SCC=>mean);
+            p1 = plot(df_E.p, df_E.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon") 
+            p1 = plot!(df_ref.p, df_ref.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon") 
+            p2 = plot(df_E.p, df_E.Y_mean, xlabel = "Temperature", ylabel = "degree C") 
+            p2 = plot!(df_ref.p, df_ref.Y_mean, xlabel = "Temperature", ylabel = "degree C") 
+            p3 = plot(df_E.p, df_E.SCC_mean, xlabel = "SCC (\$/ton)")
+            p3 = plot!(df_ref.p, df_ref.SCC_mean, xlabel = "SCC (\$/ton)")
+            p4 = plot(df_E.p, df_E.U_mean./df_ref.U_mean, xlabel = "Rel. U to Case 1")
+        end
+        plot(p1, p2, p3, p4, layout = (2, 2), legend = false)
     end
-        
-    plot(p1, p2, p3, p4, layout = (2, 2), legend = false)
 
 end

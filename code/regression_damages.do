@@ -15,7 +15,7 @@ global g31 = 0.0
 global g32 = 0.039
 global g33 = 0.772
 global thresh2 = 4.0
-global thresh3 = 3.0
+global thresh3 = 2.7
 
 forvalues i=1(1)3 {
 	gen d`i' =  temp * $g1 + temp^2 * $g2 / 2.0 + ${g3`i'} * temp3
@@ -31,6 +31,7 @@ gen d3_po = d3 - $g1 * temp - $g2 * temp2
 * approximate function
 forvalues d=2(1)3 {
 	reg d`d'_po temp3_alt if temp < ${thresh`d'}, nocons
+	di _b[temp3_alt]
 	gen d`d'_fit = $g1 * temp + $g2 * temp2 + _b[temp3_alt] * temp3_alt
 	gen N`d'_fit = exp(d`d'_fit)
 	gen invN`d'_fit = 1/N`d'_fit
@@ -43,10 +44,10 @@ twoway (scatter invN3 temp) (line invN3_fit temp) if temp < $thresh3 + 1.0
  
  drop if temp > 6
 
-colorpalette economist, nograph
+set scheme s2mono
 return list
-line invN1 invN2 invN2_fit invN3 invN3_fit temp, ///
+line invN1 invN2_fit invN3_fit temp if temp < 3.0, ///
 	lcolor(`r(p)') ///
 	ytitle("1/N") xtitle("Temp. increase in C") ///
-	legend(order(1 "Case 1" 2 "Case 2" 4 "Case 3" 3 "Case Approx. 2" 5 "Case Approx. 3"))
+	legend(rows(1) order(1 "Case 1" 2 "Case 2" 3 "Case 3")) graphregion(color(white))
 graph export "/Users/mreguant/Documents/git/macro-annual-comment/output/damages.pdf", replace
