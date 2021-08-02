@@ -15,7 +15,7 @@ global g31 = 0.0
 global g32 = 0.039
 global g33 = 0.772
 global thresh2 = 4.0
-global thresh3 = 2.7
+global thresh3 = 2.66
 
 forvalues i=1(1)3 {
 	gen d`i' =  temp * $g1 + temp^2 * $g2 / 2.0 + ${g3`i'} * temp3
@@ -51,3 +51,4 @@ line invN1 invN2_fit invN3_fit temp if temp < 3.0, ///
 	ytitle("1/N") xtitle("Temp. increase in C") ///
 	legend(rows(1) order(1 "Case 1" 2 "Case 2" 3 "Case 3")) graphregion(color(white))
 graph export "/Users/mreguant/Documents/git/macro-annual-comment/output/damages.pdf", replace
+graph save "/Users/mreguant/Documents/git/macro-annual-comment/output/damages.gph", replace

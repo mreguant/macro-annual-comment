@@ -7,8 +7,7 @@ macro_model_climate:
 
 using CSV, DataFrames, DataFramesMeta
 using JuMP, PiecewiseLinearOpt # used for mathematical programming
-using Ipopt, Libdl # solver
-using Cbc, Gurobi
+using Ipopt # solver
 using Printf
 using LinearAlgebra
 using Statistics, StatsBase
@@ -35,104 +34,61 @@ params = Dict("beta" => .99, "eta" => 0.032,
 T = 20;
 T1 = 3;
 Y = 10;
-D = 6;  # needs to be a multiple of 3
-nummc = 1;
+D = 3;  # needs to be a multiple of 3
+nummc = 20;
 beta = .99;
 c = "average";
 cu = "random";
 f  = "unknown";
 
-# Running and plotting
+# Running and plotting baseline compared to BAU
 res1 = run_model(T, T1, Y, D, beta, params, dmg="Nordhaus", clim=c, climunc=cu, mc=nummc);
-
-res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
-plot_model(res2, res1, scat=false)
-Plots.savefig(string(path,"output/outcome_Medium_",c,"_",cu,".pdf"));
-plot_model(res2, res1, only_emissions=true)
-Plots.savefig(string(path,"output/scatter_Medium_",c,"_",cu,".pdf"));
-
-res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
-plot_model(res3, res1, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_Extreme_",c,"_",cu,".pdf"));
-plot_model(res3, res1, scat=true)
-Plots.savefig(string(path,"output/scatter_Extreme_",c,"_",cu,".pdf"));
-
-plot_model(res3, res2, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,".pdf"));
-
 resbase = run_model(T, T1, Y, D, beta, params, dmgunc=f, clim=c, climunc=cu, mc=nummc);
-plot_model(resbase, res1, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_",c,"_",cu,"_",f,".pdf"));
+plot_model(resbase, res1, only_emissions=true, name=string(path,"output/outcome_baseline"));
 plot_model(resbase, res1, scat=true)
-Plots.savefig(string(path,"output/scatter_",c,"_",cu,"_",f,".pdf"));
-
+Plots.savefig(string(path,"output/scatter_baseline.pdf"));
 
 # adding ambiguity beliefs (more conservative)
 params["pr1"] = 0.1;
 params["pr2"] = 0.35;
 params["pr3"] = 0.55;
-
 res = run_model(T, T1, Y, D, beta, params, dmgunc=f, clim=c, climunc=cu, mc=nummc);
-plot_model(res, resbase, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_ambiguity.pdf"));
+plot_model(res, resbase, only_emissions=true, name=string(path,"output/outcome_ambiguity"));
 plot_model(res, resbase, scat=true)
 Plots.savefig(string(path,"output/scatter_ambiguity.pdf"));
-
 
 # adding gradual learning about scenarios
 params["pr1"] = 1.0/3.0;
 params["pr2"] = 1.0/3.0;
 params["pr3"] = 1.0/3.0;
-
-res = run_model(T, T1, Y, D, beta, params, dmgunc="gradual", dmgalpha=0.05, clim=c, climunc=cu, mc=nummc);
-plot_model(res, resbase, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_gradual_learning1.pdf"));
-plot_model(res, resbase, scat=true)
-Plots.savefig(string(path,"output/scatter_gradual_learning1.pdf"));
-
 res = run_model(T, T1, Y, D, beta, params, dmgunc="gradual", dmgalpha=0.1, clim=c, climunc=cu, mc=nummc);
-plot_model(res, resbase, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_gradual_learning2.pdf"));
+plot_model(res, resbase, only_emissions=true, name=string(path,"output/outcome_gradual_learning"));
 plot_model(res, resbase, scat=true)
-Plots.savefig(string(path,"output/scatter_gradual_learning2.pdf"));
+Plots.savefig(string(path,"output/scatter_gradual_learning.pdf"));
 
 # adding emissions constraints
 params["Emin"] = 15.0;
-
 res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
 res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
-plot_model(res3, res2, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,"_Emin.pdf"));
-
+plot_model(res3, res2, only_emissions=true, name=string(path,"output/outcome_comparison_Emin"));
 
 # adding gradual constraints
 params["Emin"] = 1.0;
 params["E0"] = 45.0;
-
 res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
 res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
-
-plot_model(res3, res2, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,"_Decrease.pdf"));
-
+plot_model(res3, res2, only_emissions=true, name=string(path,"output/outcome_comparison_Decrease"));
 
 # adding gradual constraints + min 
 params["Emin"] = 15.0;
 params["E0"] = 45.0;
-
 res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
 res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
-
-plot_model(res3, res2, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,"_Constraints.pdf"));
-
+plot_model(res3, res2, only_emissions=true, name=string(path,"output/outcome_comparison_Constraints"));
 
 # adding gradual reductions + Leontieff constraints
 params["Emin"] = 1.0;
 params["Leontieff"] = 0.02;
-
 res2 = run_model(T, T1, Y, D, beta, params, dmg="Medium", clim=c, climunc=cu, mc=nummc);
 res3 = run_model(T, T1, Y, D, beta, params, dmg="Extreme", clim=c, climunc=cu, mc=nummc);
-
-plot_model(res3, res2, only_emissions=true)
-Plots.savefig(string(path,"output/outcome_comparison_",c,"_",cu,"_Leontieff.pdf"));
+plot_model(res3, res2, only_emissions=true, name=string(path,"output/outcome_comparison_Leontieff"));

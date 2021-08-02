@@ -8,7 +8,6 @@ macro_model_climate:
 using CSV, DataFrames, DataFramesMeta
 using JuMP, PiecewiseLinearOpt # used for mathematical programming
 using Ipopt # solver
-using Cbc, Gurobi
 using Printf
 using LinearAlgebra
 using Statistics
@@ -172,8 +171,8 @@ function solve_model(pm::Dict{String,Float64}, df::DataFrame)
 
     # gradual constraints 
     if (pm["E0"]!=0.0)
-        @constraint(model, E[1]==pm["E0"])
-        @constraint(model, [s in 2:S], E[s] >= 0.6*E[df.s_1[s]]);
+        @constraint(model, E[1] >= 0.6 * pm["E0"]);
+        @constraint(model, [s in 2:S], E[s] >= 0.6 * E[df.s_1[s]]);
     end
 
     optimize!(model);
@@ -227,14 +226,17 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
 end
 
 
-function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true, only_emissions=false)
+function plot_model(df_plt::DataFrame, ref_case::DataFrame; scat=true, only_emissions=false, name="file")
     
     if (only_emissions == true)
         df_E = combine(groupby(df_plt,:p), :E=>mean, :Y=>mean, :N=>mean, :U=>mean, :SCC=>mean);
             df_ref = combine(groupby(ref_case,:p), :E=>mean, :Y=>mean, :U=>mean, :SCC=>mean);
             p1 = plot(df_E.p, df_E.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon", linestyle=:dash, linewidth=2, linecolor=:black) 
             p1 = plot!(df_ref.p, df_ref.E_mean/3.67, xlabel = "Emissions", ylabel = "Gt Carbon", linewidth=2, linecolor=:black) 
-        plot(p1, legend = false)   
+        plot(p1, legend = false) 
+        data = DataFrame([p1.series_list[1][:x], p1.series_list[2][:y], p1.series_list[1][:y]], ["Year","Solid","Dashed"]);
+        CSV.write(string(name,".csv"), data);
+        Plots.savefig(string(name,".pdf"));
     else
         if (scat==true)
             p1 = scatter(df_plt.p, df_plt.E/3.67, xlabel = "Emissions", ylabel = "Gt Carbon")

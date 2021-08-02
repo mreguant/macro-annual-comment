@@ -27,3 +27,6 @@ Manifest.toml
 input/~$model144_exploration.xlsx
 input/model144_exploration.xlsx
 *.pdf
+output/
+submission*
+submission/
