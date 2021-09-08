@@ -30,3 +30,4 @@ input/model144_exploration.xlsx
 output/
 submission*
 submission/
+code/_deprecated/model.jl
