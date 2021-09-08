@@ -217,7 +217,7 @@ function run_model(T::Int64, T1::Int64, Y::Int64, D::Int64, beta::Float64, pm::D
 
     # keep only up to 2100
     results.p = (results.p .- 1.0)*Y .+ 2020;
-    @linq df_plt = results |> where(results.p .<= 2100);
+    df_plt = filter(row -> row.p <= 2100, results);
     df_plt = combine(groupby(df_plt,[:p, :s]),:U=>mean=>:U, :V=>mean=>:V, 
             :E=>mean=>:E, :Y=>mean=>:Y, :N=>mean=>:N, :SCC=>mean=>:SCC);
 
